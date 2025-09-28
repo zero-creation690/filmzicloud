@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   const chatId = message.chat.id;
 
-  // /start message
+  // Handle /start
   if (message.text && message.text.startsWith('/start')) {
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
@@ -58,8 +58,8 @@ export default async function handler(req, res) {
     // Save mapping in Redis: shortId => { fileId, fileName }
     await redis.set(`file:${shortId}`, JSON.stringify({ fileId, fileName }));
 
-    // Build permanent link
-    const link = `${BASE_URL}/dl/${encodeURIComponent(fileName)}-${shortId}`;
+    // Build permanent link: /dl/shortId/fileName
+    const link = `${BASE_URL}/dl/${shortId}/${encodeURIComponent(fileName)}`;
 
     // Reply back to user
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
