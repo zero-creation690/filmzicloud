@@ -42,6 +42,18 @@ def get_file_direct_url(file_id):
             return f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
     return None
 
+def format_file_size(bytes_size):
+    if bytes_size == 0:
+        return "0 B"
+    
+    sizes = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    while bytes_size >= 1024 and i < len(sizes) - 1:
+        bytes_size /= 1024.0
+        i += 1
+    
+    return f"{bytes_size:.2f} {sizes[i]}"
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
@@ -81,23 +93,25 @@ class handler(BaseHTTPRequestHandler):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>File Not Found - Filmzi Cloud</title>
+                    <title>File Not Found - FileStreamBot</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
-                        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }}
-                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); text-align: center; max-width: 500px; }}
-                        .error-icon {{ font-size: 80px; margin-bottom: 20px; }}
-                        .btn {{ background: white; color: #667eea; padding: 15px 30px; text-decoration: none; border-radius: 10px; display: inline-block; margin: 10px; font-weight: bold; }}
+                        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); text-align: center; max-width: 500px; border: 1px solid rgba(255,255,255,0.2); }}
+                        .error-icon {{ font-size: 80px; margin-bottom: 20px; color: #ff6b6b; }}
+                        h1 {{ font-size: 28px; margin-bottom: 15px; color: #ff6b6b; }}
+                        .btn {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 10px; display: inline-block; margin: 10px; font-weight: bold; border: none; cursor: pointer; transition: transform 0.2s; }}
+                        .btn:hover {{ transform: translateY(-2px); }}
                     </style>
                 </head>
                 <body>
                     <div class="container">
                         <div class="error-icon">❌</div>
                         <h1>File Not Found</h1>
-                        <p>The download link is invalid or the file has been removed.</p>
-                        <p><strong>File ID:</strong> {short_id}</p>
-                        <a href="{BASE_URL}" class="btn">🔄 Go to Filmzi Cloud</a>
-                        <a href="https://t.me/filmzicloud_bot" class="btn">🤖 Open Bot</a>
+                        <p style="margin-bottom: 20px; opacity: 0.8;">The download link is invalid or the file has been removed.</p>
+                        <p style="margin-bottom: 20px;"><strong>File ID:</strong> {short_id}</p>
+                        <a href="{BASE_URL}" class="btn">🔄 Go to FileStreamBot</a>
                     </div>
                 </body>
                 </html>
@@ -108,7 +122,7 @@ class handler(BaseHTTPRequestHandler):
             file_id = file_data.get('file_id')
             file_name = file_data.get('file_name', original_filename)
             file_size = file_data.get('file_size', 0)
-            size_mb = round(file_size / (1024 * 1024), 2) if file_size > 0 else 'Unknown'
+            size_readable = format_file_size(file_size)
             
             download_url = get_file_direct_url(file_id)
             
@@ -120,7 +134,7 @@ class handler(BaseHTTPRequestHandler):
                 self.send_header('Cache-Control', 'public, max-age=31536000')
                 self.end_headers()
             else:
-                # Fallback: Show download page
+                # Show beautiful download page
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html')
                 self.end_headers()
@@ -129,18 +143,20 @@ class handler(BaseHTTPRequestHandler):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Download {file_name} - Filmzi Cloud</title>
+                    <title>Download {file_name} - FileStreamBot</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
-                        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: white; }}
-                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); text-align: center; max-width: 600px; }}
-                        .file-icon {{ font-size: 80px; margin-bottom: 20px; }}
-                        .filename {{ font-size: 24px; font-weight: bold; word-break: break-word; margin: 20px 0; }}
-                        .file-info {{ background: rgba(255,255,255,0.2); padding: 20px; border-radius: 10px; margin: 20px 0; }}
-                        .btn {{ background: white; color: #667eea; padding: 18px 40px; text-decoration: none; border-radius: 12px; display: inline-block; font-size: 18px; font-weight: bold; margin: 10px; }}
-                        .stream-btn {{ background: #00c853; color: white; }}
+                        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); text-align: center; max-width: 600px; border: 1px solid rgba(255,255,255,0.2); }}
+                        .file-icon {{ font-size: 80px; margin-bottom: 20px; color: #4ecdc4; }}
+                        .filename {{ font-size: 22px; font-weight: bold; word-break: break-word; margin: 20px 0; color: #fff; }}
+                        .file-info {{ background: rgba(255,255,255,0.15); padding: 20px; border-radius: 10px; margin: 20px 0; text-align: left; }}
+                        .btn {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 18px 40px; text-decoration: none; border-radius: 12px; display: inline-block; font-size: 18px; font-weight: bold; margin: 10px; border: none; cursor: pointer; transition: transform 0.2s; }}
+                        .btn:hover {{ transform: translateY(-2px); }}
+                        .stream-btn {{ background: linear-gradient(135deg, #00c853 0%, #64dd17 100%); }}
                         .features {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }}
-                        .feature {{ background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; }}
+                        .feature {{ background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; font-size: 14px; }}
                     </style>
                 </head>
                 <body>
@@ -149,18 +165,14 @@ class handler(BaseHTTPRequestHandler):
                         <div class="filename">{file_name}</div>
                         
                         <div class="file-info">
-                            <div><strong>Size:</strong> {size_mb} MB</div>
+                            <div><strong>Size:</strong> {size_readable}</div>
                             <div><strong>Type:</strong> Download</div>
-                            <div><strong>Status:</strong> Ready</div>
+                            <div><strong>Status:</strong> Ready for download</div>
                         </div>
                         
                         <div style="margin: 30px 0;">
                             <a href="{download_url}" class="btn" download="{file_name}">
                                 ⬇️ DOWNLOAD NOW
-                            </a>
-                            <br>
-                            <a href="{BASE_URL}/api/stream/{filename_encoded}-{short_id}" class="btn stream-btn">
-                                📺 STREAM INSTEAD
                             </a>
                         </div>
                         
@@ -171,13 +183,14 @@ class handler(BaseHTTPRequestHandler):
                             <div class="feature">💾 2GB Support</div>
                         </div>
                         
-                        <div style="margin-top: 30px;">
-                            <p>Powered by <strong>Filmzi Cloud</strong></p>
-                            <a href="{BASE_URL}" style="color: white; text-decoration: underline;">Upload more files</a>
+                        <div style="margin-top: 30px; opacity: 0.8;">
+                            <p>Powered by <strong>FileStreamBot</strong></p>
+                            <a href="{BASE_URL}" style="color: #4ecdc4; text-decoration: none;">Upload more files</a>
                         </div>
                     </div>
                     
                     <script>
+                        // Auto-start download after 1 second
                         setTimeout(function() {{
                             window.location.href = "{download_url}";
                         }}, 1000);
@@ -193,12 +206,12 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             error_html = f"""
             <html>
-            <body style="font-family: Arial; text-align: center; margin: 100px auto; max-width: 500px; background: #f8f9fa; padding: 50px;">
-                <div style="font-size: 80px;">😵</div>
-                <h2 style="color: #ff4444;">Download Error</h2>
-                <p>Error: {str(e)}</p>
-                <p>Please try again or contact support.</p>
-                <a href="{BASE_URL}" style="background: #0088cc; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; margin-top: 20px;">Go to Filmzi Cloud</a>
+            <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 100px auto; max-width: 500px; background: #1a1a2e; color: white; padding: 50px;">
+                <div style="font-size: 80px; color: #ff6b6b;">😵</div>
+                <h2 style="color: #ff6b6b; margin-bottom: 20px;">Download Error</h2>
+                <p style="margin-bottom: 20px;">Error: {str(e)}</p>
+                <p style="margin-bottom: 30px;">Please try again or contact support.</p>
+                <a href="{BASE_URL}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block;">Go to FileStreamBot</a>
             </body>
             </html>
             """
