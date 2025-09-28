@@ -1,8 +1,5 @@
 {
   "functions": {
-    "api/webhook.py": {
-      "maxDuration": 30
-    },
     "api/download/[slug].py": {
       "maxDuration": 30
     },
@@ -11,11 +8,6 @@
     }
   },
   "routes": [
-    {
-      "src": "/api/webhook",
-      "dest": "/api/webhook.py",
-      "methods": ["GET", "POST", "HEAD"]
-    },
     {
       "src": "/api/download/(.*)",
       "dest": "/api/download/[slug].py",
