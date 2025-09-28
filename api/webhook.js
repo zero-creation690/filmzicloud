@@ -1,4 +1,3 @@
-// api/webhook.js
 import { Redis } from "@upstash/redis";
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
@@ -13,10 +12,17 @@ function randomId() {
   return Math.floor(10000 + Math.random() * 90000); // random 5-digit
 }
 
+// Escape MarkdownV2 special characters
+function escapeMarkdownV2(text = "") {
+  return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('❌ Method not allowed');
 
   const update = req.body;
+  console.log("Received update:", JSON.stringify(update));
+
   const message = update.message;
   if (!message) return res.status(200).send('No message');
 
@@ -24,20 +30,27 @@ export default async function handler(req, res) {
 
   // ✅ Handle /start
   if (message.text && message.text.startsWith('/start')) {
-    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        chat_id: chatId,
-        text: `👋 Hello *${message.from.first_name || "friend"}*!\n\n📂 Send me any file and I’ll give you a permanent download link ⚡\n\n🛡️ Stored safely in *Filmzi Cloud*!`,
-        parse_mode: "Markdown"
-      })
-    });
-    return res.status(200).send('ok');
+    try {
+      const name = escapeMarkdownV2(message.from.first_name || "friend");
+      await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          chat_id: chatId,
+          text: `👋 Hello *${name}*!\n\n📂 Send me any file and I’ll give you a permanent download link ⚡\n\n🛡️ Stored safely in *Filmzi Cloud*!`,
+          parse_mode: "MarkdownV2"
+        })
+      });
+      console.log("/start message sent to", chatId);
+      return res.status(200).end();
+    } catch (err) {
+      console.error("Error sending /start message:", err);
+      return res.status(500).send("Server error");
+    }
   }
 
   // ✅ Handle file upload
-  let fileObj = message.document || message.video || message.audio || null;
+  const fileObj = message.document || message.video || message.audio || null;
   if (!fileObj) return res.status(200).send('No file found');
 
   try {
@@ -51,32 +64,34 @@ export default async function handler(req, res) {
       })
     });
     const fwdJson = await fwd.json();
+    if (!fwdJson.ok) throw new Error(JSON.stringify(fwdJson));
 
     const fileId = fileObj.file_id;
     const fileName = fileObj.file_name || 'file';
     const shortId = randomId();
 
-    // ✅ Save in Redis (permanent)
+    // Save in Redis
     await redis.set(shortId, JSON.stringify({ fileId, fileName }));
 
-    // Build clean permanent link
+    // Build permanent link
     const base = BASE_URL || `https://${req.headers.host}`;
     const link = `${base}/dl/${encodeURIComponent(fileName)}-${shortId}`;
 
-    // Reply back to user with style ✨
+    // Reply to user
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         chat_id: chatId,
-        text: `✅ Your link is ready!\n\n🎬 *File:* ${fileName}\n🔗 *Download:* ${link}\n\n⚡ Stored safely in Filmzi Cloud!`,
-        parse_mode: "Markdown"
+        text: `✅ Your link is ready!\n\n🎬 *File:* ${escapeMarkdownV2(fileName)}\n🔗 *Download:* ${link}\n\n⚡ Stored safely in Filmzi Cloud!`,
+        parse_mode: "MarkdownV2"
       })
     });
 
-    return res.status(200).send('ok');
+    console.log("File processed and link sent to", chatId);
+    return res.status(200).end();
   } catch (err) {
-    console.error('webhook error', err);
+    console.error('Webhook file handling error:', err);
     return res.status(500).send('Server error');
   }
 }
