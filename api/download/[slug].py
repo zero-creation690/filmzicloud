@@ -31,7 +31,7 @@ def get_from_redis(short_id):
         print(f"Redis get error: {e}")
         return None
 
-def get_file_download_url(file_id):
+def get_file_direct_url(file_id):
     """Get direct download URL from Telegram"""
     url = f"https://api.telegram.org/bot{TOKEN}/getFile"
     data = {'file_id': file_id}
@@ -78,6 +78,7 @@ class handler(BaseHTTPRequestHandler):
             file_data = get_from_redis(short_id)
             
             if not file_data:
+                # File not found
                 self.send_response(404)
                 self.send_header('Content-Type', 'text/html')
                 self.end_headers()
@@ -86,80 +87,108 @@ class handler(BaseHTTPRequestHandler):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>File Not Found</title>
+                    <title>File Not Found - Filmzi Cloud</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
-                        body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 100px auto; padding: 20px; text-align: center; }}
-                        .error {{ color: #ff4444; font-size: 24px; }}
+                        body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 100px auto; padding: 20px; text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }}
+                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); }}
+                        .error-icon {{ font-size: 80px; margin-bottom: 20px; }}
+                        .btn {{ background: white; color: #667eea; padding: 15px 30px; text-decoration: none; border-radius: 10px; display: inline-block; margin-top: 20px; font-weight: bold; }}
                     </style>
                 </head>
                 <body>
-                    <div class="error">❌ File Not Found</div>
-                    <p>The download link is invalid or the file has been removed.</p>
-                    <p>File ID: {short_id}</p>
-                    <p><a href="/">Upload a new file</a></p>
+                    <div class="container">
+                        <div class="error-icon">❌</div>
+                        <h1>File Not Found</h1>
+                        <p>The download link is invalid or the file has been removed.</p>
+                        <p><strong>File ID:</strong> {short_id}</p>
+                        <a href="https://t.me/filmzicloud_bot" class="btn">Upload New File</a>
+                    </div>
                 </body>
                 </html>
                 """
                 self.wfile.write(html_content.encode())
                 return
             
-            # Get the actual download URL from Telegram
+            # Get file info
             file_id = file_data.get('file_id')
-            download_url = get_file_download_url(file_id)
+            file_name = file_data.get('file_name', original_filename)
+            file_size = file_data.get('file_size', 0)
+            size_mb = round(file_size / (1024 * 1024), 2) if file_size > 0 else 'Unknown'
+            
+            # Get REAL download URL from Telegram
+            download_url = get_file_direct_url(file_id)
             
             if download_url:
                 # Redirect to Telegram's CDN for direct download
                 self.send_response(302)
                 self.send_header('Location', download_url)
-                self.send_header('Content-Disposition', f'attachment; filename="{original_filename}"')
+                self.send_header('Content-Disposition', f'attachment; filename="{file_name}"')
                 self.send_header('Cache-Control', 'public, max-age=31536000')  # 1 year cache
                 self.end_headers()
             else:
-                # Fallback: Serve download page with info
+                # Fallback: Show beautiful download page
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html')
                 self.end_headers()
-                
-                file_size = file_data.get('file_size', 0)
-                size_mb = round(file_size / (1024 * 1024), 2) if file_size > 0 else 'Unknown'
                 
                 html_content = f"""
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Download {original_filename}</title>
+                    <title>Download {file_name} - Filmzi Cloud</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
-                        body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
-                        .container {{ background: #f0f8ff; padding: 30px; border-radius: 15px; text-align: center; }}
-                        .filename {{ font-size: 20px; font-weight: bold; color: #333; }}
-                        .info {{ margin: 15px 0; color: #666; }}
-                        .btn {{ background: #0088cc; color: white; padding: 15px 30px; text-decoration: none; 
-                                border-radius: 8px; display: inline-block; font-size: 18px; margin: 10px; }}
-                        .btn:hover {{ background: #006699; }}
-                        .features {{ background: white; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+                        body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; }}
+                        .container {{ background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px); margin-top: 50px; }}
+                        .file-icon {{ font-size: 60px; text-align: center; margin-bottom: 20px; }}
+                        .filename {{ font-size: 24px; font-weight: bold; word-break: break-word; text-align: center; }}
+                        .file-info {{ background: rgba(255,255,255,0.2); padding: 20px; border-radius: 10px; margin: 20px 0; }}
+                        .btn {{ background: white; color: #667eea; padding: 18px 40px; text-decoration: none; border-radius: 12px; display: inline-block; font-size: 18px; font-weight: bold; margin: 10px; width: 200px; text-align: center; }}
+                        .btn:hover {{ background: #f0f0f0; transform: translateY(-2px); }}
+                        .features {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 30px 0; }}
+                        .feature {{ background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; text-align: center; }}
                     </style>
                 </head>
                 <body>
                     <div class="container">
-                        <h1>📁 Download Ready</h1>
-                        <div class="filename">{original_filename}</div>
-                        <div class="info">Size: {size_mb} MB</div>
-                        <div class="info">File ID: {short_id}</div>
+                        <div class="file-icon">📁</div>
+                        <div class="filename">{file_name}</div>
                         
-                        <div class="features">
-                            <h3>🛡️ Filmzi Cloud Features</h3>
-                            <p>✅ Permanent Storage</p>
-                            <p>✅ Never-expiring Links</p>
-                            <p>✅ Fast Download</p>
+                        <div class="file-info">
+                            <div><strong>Size:</strong> {size_mb} MB</div>
+                            <div><strong>File ID:</strong> {short_id}</div>
+                            <div><strong>Status:</strong> Ready for download</div>
                         </div>
                         
-                        {f'<a href="{download_url if download_url else "#"}" class="btn" download="{original_filename}">⬇️ Download Now</a>' if download_url else '<p class="btn" style="background: #ff4444;">Download temporarily unavailable</p>'}
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{download_url if download_url else '#'}" class="btn" download="{file_name}">
+                                ⬇️ DOWNLOAD NOW
+                            </a>
+                        </div>
                         
-                        <p style="margin-top: 20px;">
-                            <a href="/" style="color: #0088cc;">Upload another file</a>
-                        </p>
+                        <div class="features">
+                            <div class="feature">🛡️ Permanent Storage</div>
+                            <div class="feature">🔗 Never Expires</div>
+                            <div class="feature">⚡ Fast Download</div>
+                            <div class="feature">💾 2GB Support</div>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 30px;">
+                            <p>Powered by <strong>Filmzi Cloud</strong></p>
+                            <a href="https://t.me/filmzicloud_bot" style="color: white; text-decoration: underline;">Upload more files</a>
+                        </div>
                     </div>
+                    
+                    <script>
+                        // Auto-start download if possible
+                        setTimeout(function() {{
+                            const downloadBtn = document.querySelector('.btn');
+                            if(downloadBtn.href && downloadBtn.href !== '#') {{
+                                window.location.href = downloadBtn.href;
+                            }}
+                        }}, 1000);
+                    </script>
                 </body>
                 </html>
                 """
@@ -171,35 +200,13 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             error_html = f"""
             <html>
-            <body style="font-family: Arial; text-align: center; margin: 100px auto; max-width: 500px;">
+            <body style="font-family: Arial; text-align: center; margin: 100px auto; max-width: 500px; background: #f8f9fa; padding: 50px;">
+                <div style="font-size: 80px;">😵</div>
                 <h2 style="color: #ff4444;">Download Error</h2>
                 <p>Error: {str(e)}</p>
                 <p>Please try again or contact support.</p>
-                <p><a href="/">Go back</a></p>
+                <a href="https://t.me/filmzicloud_bot" style="background: #0088cc; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; margin-top: 20px;">Go to Bot</a>
             </body>
             </html>
             """
             self.wfile.write(error_html.encode())
-
-    def do_HEAD(self):
-        """Handle HEAD requests for link checking"""
-        try:
-            path = self.path.strip('/')
-            if path.startswith('api/download/'):
-                slug = path.split('api/download/')[-1]
-                if slug and '-' in slug:
-                    parts = slug.rsplit('-', 1)
-                    if len(parts) == 2:
-                        short_id = parts[1]
-                        file_data = get_from_redis(short_id)
-                        if file_data:
-                            self.send_response(200)
-                            self.send_header('Content-Type', 'application/octet-stream')
-                            self.end_headers()
-                            return
-            
-            self.send_response(404)
-            self.end_headers()
-        except:
-            self.send_response(500)
-            self.end_headers()
