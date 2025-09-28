@@ -4,7 +4,7 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 const BASE_URL = process.env.BASE_URL || '';
 
 function randomId() {
-  return Math.floor(10000 + Math.random() * 90000); // random 5-digit
+  return Math.floor(10000 + Math.random() * 90000);
 }
 
 export default async function handler(req, res) {
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     const fileName = fileObj.file_name || 'file';
     const shortId = randomId();
 
-    // Save mapping in channel (reply message with ID + file_id + name)
+    // ✅ Save mapping in channel (reply message with ID + file_id + name)
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       body: new URLSearchParams({
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     const base = BASE_URL || `https://${req.headers.host}`;
     const link = `${base}/dl/${encodeURIComponent(fileName)}-${shortId}`;
 
-    // Reply back to user with style ✨
+    // Reply back to user
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { "content-type": "application/x-www-form-urlencoded" },
