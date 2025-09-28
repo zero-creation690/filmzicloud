@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
   const chatId = message.chat.id;
 
-  // /start
+  // Handle /start
   if (message.text && message.text.startsWith('/start')) {
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
@@ -36,12 +36,12 @@ export default async function handler(req, res) {
     return res.status(200).send('ok');
   }
 
-  // Handle files
+  // Handle file uploads
   const fileObj = message.document || message.video || message.audio;
   if (!fileObj) return res.status(200).send('No file found');
 
   try {
-    // Forward file to channel (permanent storage)
+    // Forward to channel (permanent storage)
     const fwd = await fetch(`https://api.telegram.org/bot${TOKEN}/forwardMessage`, {
       method: 'POST',
       body: new URLSearchParams({
