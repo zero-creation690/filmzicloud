@@ -1,16 +1,18 @@
 import { Redis } from "@upstash/redis";
 
-const TOKEN = process.env.TELEGRAM_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const BASE_URL = process.env.BASE_URL || '';
+// ---- Directly set your bot token and channel ID ----
+const TOKEN = "8314502536:AAFLGwBTzCXPxvBPC5oMIiSKVyDaY5sm5mY";
+const CHANNEL_ID = "-1002995694885";
+const BASE_URL = "https://filmzicloud.vercel.app";
 
+// ---- Redis connection ----
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_URL,
-  token: process.env.UPSTASH_REDIS_TOKEN
+  url: "https://together-spaniel-13493.upstash.io",
+  token: "ATS1AAIncDJmMTE3M2ZmZGRjYTU0NGEwOGExODRjYTA2YjUwM2UwZnAyMTM0OTM"
 });
 
 function randomId() {
-  return Math.floor(10000 + Math.random() * 90000);
+  return Math.floor(10000 + Math.random() * 90000); // random 5-digit
 }
 
 export default async function handler(req, res) {
@@ -22,7 +24,7 @@ export default async function handler(req, res) {
 
   const chatId = message.chat.id;
 
-  // /start
+  // Handle /start
   if (message.text && message.text.startsWith('/start')) {
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
@@ -36,7 +38,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // file upload
+  // Handle file upload
   const fileObj = message.document || message.video || message.audio || null;
   if (!fileObj) return res.status(200).send('No file found');
 
@@ -58,8 +60,7 @@ export default async function handler(req, res) {
     // Save in Redis
     await redis.set(shortId, JSON.stringify({ fileId, fileName }));
 
-    const base = BASE_URL || `https://${req.headers.host}`;
-    const link = `${base}/dl/${encodeURIComponent(fileName)}-${shortId}`;
+    const link = `${BASE_URL}/dl/${encodeURIComponent(fileName)}-${shortId}`;
 
     // Reply to user
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
 
     return res.status(200).end();
   } catch (err) {
-    console.error('webhook error', err);
+    console.error('Webhook error:', err);
     return res.status(500).send('Server error');
   }
 }
