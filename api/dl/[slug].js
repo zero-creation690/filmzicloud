@@ -1,3 +1,4 @@
+// api/dl/[slug].js
 import { Redis } from '@upstash/redis';
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
@@ -10,11 +11,13 @@ export default async function handler(req, res) {
   const { slug } = req.query;
   if (!slug) return res.status(400).send('Missing slug');
 
-  const parts = slug.split("-");
-  const shortId = parts.pop();
-  const fileName = decodeURIComponent(parts.join("-"));
-
   try {
+    const lastDashIndex = slug.lastIndexOf('-');
+    if (lastDashIndex === -1) return res.status(400).send('Invalid slug');
+
+    const fileName = decodeURIComponent(slug.slice(0, lastDashIndex));
+    const shortId = slug.slice(lastDashIndex + 1);
+
     // Get mapping from Redis
     const data = await redis.get(`file:${shortId}`);
     if (!data) return res.status(404).send('File not found');
