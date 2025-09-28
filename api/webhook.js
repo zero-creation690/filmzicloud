@@ -14,6 +14,23 @@ export default async function handler(req, res) {
   const message = update.message;
   if (!message) return res.status(200).send('No message');
 
+  const chatId = message.chat.id;
+
+  // ✅ Handle /start
+  if (message.text && message.text.startsWith('/start')) {
+    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        chat_id: chatId,
+        text: `👋 Hello *${message.from.first_name || "friend"}*!\n\n📂 Send me any file and I’ll give you a permanent download link ⚡\n\n🛡️ Stored safely in *Filmzi Cloud*!`,
+        parse_mode: "Markdown"
+      })
+    });
+    return res.status(200).send('ok');
+  }
+
+  // ✅ Handle file upload
   let fileObj = message.document || message.video || message.audio || null;
   if (!fileObj) return res.status(200).send('No file found');
 
@@ -23,7 +40,7 @@ export default async function handler(req, res) {
       method: 'POST',
       body: new URLSearchParams({
         chat_id: CHANNEL_ID,
-        from_chat_id: message.chat.id,
+        from_chat_id: chatId,
         message_id: message.message_id
       })
     });
@@ -50,9 +67,9 @@ export default async function handler(req, res) {
     // Reply back to user with style ✨
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        chat_id: message.chat.id,
+        chat_id: chatId,
         text: `✅ Your link is ready!\n\n🎬 *File:* ${fileName}\n🔗 *Download:* ${link}\n\n⚡ Stored safely in Filmzi Cloud!`,
         parse_mode: "Markdown"
       })
