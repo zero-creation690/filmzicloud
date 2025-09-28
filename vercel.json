@@ -1,13 +1,28 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "api/**/*.js", "use": "@vercel/node" }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1.js" },
-    {
-      "src": "/dl/([^/]+)/(.*)",
-      "dest": "/api/dl/[shortId]/index.js?fileName=$2&shortId=$1"
+  "functions": {
+    "api/webhook.py": {
+      "maxDuration": 30
+    },
+    "api/download/[slug].py": {
+      "maxDuration": 30
     }
-  ]
+  },
+  "routes": [
+    {
+      "src": "/api/webhook",
+      "dest": "/api/webhook.py",
+      "methods": ["GET", "POST"]
+    },
+    {
+      "src": "/api/download/(.*)",
+      "dest": "/api/download/[slug].py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/webhook.py"
+    }
+  ],
+  "env": {
+    "PYTHON_VERSION": "3.9"
+  }
 }
