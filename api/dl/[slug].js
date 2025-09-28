@@ -1,5 +1,10 @@
+import { Redis } from "@upstash/redis";
+
 const TOKEN = process.env.TELEGRAM_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_URL,
+  token: process.env.UPSTASH_REDIS_TOKEN
+});
 
 export default async function handler(req, res) {
   const { slug } = req.query;
@@ -10,27 +15,13 @@ export default async function handler(req, res) {
   const fileName = decodeURIComponent(parts.join("-"));
 
   try {
-    // ✅ Get recent messages from channel (to find mapping)
-    const getMsgs = await fetch(`https://api.telegram.org/bot${TOKEN}/getUpdates?offset=-100`);
-    const updates = await getMsgs.json();
+    // ✅ Fetch file mapping from Redis
+    const data = await redis.get(shortId);
+    if (!data) return res.status(404).send('File not found');
 
-    let fileId = null;
+    const { fileId } = JSON.parse(data);
 
-    if (updates.ok) {
-      for (let u of updates.result.reverse()) {
-        if (u.message?.chat?.id == Number(CHANNEL_ID) && u.message?.text?.startsWith(shortId + "|")) {
-          const parts = u.message.text.split("|");
-          if (parts[0] === shortId) {
-            fileId = parts[1];
-            break;
-          }
-        }
-      }
-    }
-
-    if (!fileId) return res.status(404).send('File not found');
-
-    // ✅ Get file path
+    // ✅ Get Telegram file path
     const gf = await fetch(`https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`);
     const gfJson = await gf.json();
     if (!gfJson.ok) return res.status(502).send('Could not get file path');
@@ -38,7 +29,7 @@ export default async function handler(req, res) {
     const file_path = gfJson.result.file_path;
     const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file_path}`;
 
-    // Proxy with streaming + range support
+    // Proxy streaming with range support
     const headers = {};
     if (req.headers.range) headers['range'] = req.headers.range;
 
