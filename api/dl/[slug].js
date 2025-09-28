@@ -17,48 +17,71 @@ async function findFileMapping(shortId) {
   }
 
   try {
-    // Method 1: Search using getUpdates (more reliable)
-    let offset = -1;
+    // Method 1: Use getChatHistory to get ALL channel messages (most reliable)
+    console.log(`📋 Using getChatHistory to search for ${shortId}...`);
+    
     let foundMapping = null;
-    let searchAttempts = 0;
-    const maxSearchAttempts = 20;
+    let lastMessageId = 0; // Start from the latest message
+    let batchCount = 0;
+    let totalMessagesChecked = 0;
+    const maxBatches = 1000; // Prevent infinite loops
+    const messagesPerBatch = 100;
 
-    while (!foundMapping && searchAttempts < maxSearchAttempts) {
-      const getUpdatesUrl = offset === -1 
-        ? `https://api.telegram.org/bot${TOKEN}/getUpdates?limit=100&allowed_updates=["message"]`
-        : `https://api.telegram.org/bot${TOKEN}/getUpdates?offset=${offset}&limit=100&allowed_updates=["message"]`;
-      
-      const resp = await fetch(getUpdatesUrl);
-      const json = await resp.json();
-      
-      if (!json.ok || !json.result?.length) {
-        console.log(`❌ getUpdates failed or no results: ${json.description || 'No data'}`);
-        break;
-      }
+    while (!foundMapping && batchCount < maxBatches) {
+      try {
+        // Get messages from the channel
+        const historyUrl = `https://api.telegram.org/bot${TOKEN}/getChatHistory`;
+        const historyBody = {
+          chat_id: CHANNEL_ID,
+          limit: messagesPerBatch,
+          offset_id: lastMessageId
+        };
 
-      console.log(`📨 Checking ${json.result.length} updates, attempt ${searchAttempts + 1}`);
+        const historyResp = await fetch(historyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(historyBody)
+        });
 
-      for (const update of json.result) {
-        const message = update.message;
-        if (message?.chat?.id == CHANNEL_ID && message.text) {
-          const text = message.text;
+        const historyJson = await historyResp.json();
+
+        if (!historyJson.ok) {
+          console.log(`❌ getChatHistory failed: ${historyJson.description}`);
           
-          // Method 1: Look for new JSON format
+          // Fallback to getUpdates method
+          return await searchUsingUpdates(shortId);
+        }
+
+        const messages = historyJson.result?.messages || [];
+        if (messages.length === 0) {
+          console.log(`📝 No more messages to check after ${totalMessagesChecked} messages`);
+          break;
+        }
+
+        console.log(`📨 Batch ${batchCount + 1}: Checking ${messages.length} messages (total: ${totalMessagesChecked + messages.length})`);
+        totalMessagesChecked += messages.length;
+
+        // Search through messages for our mapping
+        for (const message of messages) {
+          if (!message.text) continue;
+          
+          const text = message.text;
+
+          // Method 1: Look for JSON format
           if (text.startsWith(`FILE_MAP_${shortId}:`)) {
             try {
               const jsonStr = text.replace(`FILE_MAP_${shortId}:`, '');
-              const mappingData = JSON.parse(jsonStr);
-              console.log(`✅ Found JSON mapping for ${shortId}:`, mappingData);
-              foundMapping = mappingData;
+              foundMapping = JSON.parse(jsonStr);
+              console.log(`✅ Found JSON mapping for ${shortId} after ${totalMessagesChecked} messages:`, foundMapping);
               break;
             } catch (parseErr) {
               console.log(`⚠️ JSON parse error for ${shortId}:`, parseErr.message);
             }
           }
-          
-          // Method 2: Look for pipe-separated format (backup)
-          if (text.startsWith(shortId + "|")) {
-            const parts = text.split("|");
+
+          // Method 2: Look for pipe format
+          if (text.startsWith(`${shortId}|`)) {
+            const parts = text.split('|');
             if (parts.length >= 3) {
               foundMapping = {
                 id: shortId,
@@ -67,16 +90,49 @@ async function findFileMapping(shortId) {
                 size: parts[3] ? parseInt(parts[3]) : null,
                 timestamp: parts[4] ? parseInt(parts[4]) : null
               };
-              console.log(`✅ Found pipe mapping for ${shortId}:`, foundMapping);
+              console.log(`✅ Found pipe mapping for ${shortId} after ${totalMessagesChecked} messages:`, foundMapping);
               break;
             }
           }
-        }
-        offset = Math.max(offset, update.update_id + 1);
-      }
 
-      if (json.result.length < 100) break; // No more results
-      searchAttempts++;
+          // Method 3: Look for database entry format
+          if (text.startsWith(`DB_ENTRY:${shortId}:`)) {
+            try {
+              const jsonStr = text.replace(`DB_ENTRY:${shortId}:`, '');
+              foundMapping = JSON.parse(jsonStr);
+              console.log(`✅ Found DB mapping for ${shortId} after ${totalMessagesChecked} messages:`, foundMapping);
+              break;
+            } catch (parseErr) {
+              console.log(`⚠️ DB parse error for ${shortId}:`, parseErr.message);
+            }
+          }
+
+          // Update lastMessageId for pagination
+          if (message.message_id < lastMessageId || lastMessageId === 0) {
+            lastMessageId = message.message_id;
+          }
+        }
+
+        if (foundMapping) break;
+
+        // If we got fewer messages than requested, we've reached the end
+        if (messages.length < messagesPerBatch) {
+          console.log(`📝 Reached end of channel history after ${totalMessagesChecked} messages`);
+          break;
+        }
+
+        batchCount++;
+
+        // Small delay to avoid rate limiting
+        if (batchCount % 10 === 0) {
+          console.log(`⏸️ Brief pause after ${batchCount} batches...`);
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+      } catch (batchError) {
+        console.error(`❌ Error in batch ${batchCount}:`, batchError);
+        break;
+      }
     }
 
     if (foundMapping) {
@@ -85,54 +141,83 @@ async function findFileMapping(shortId) {
         data: foundMapping,
         timestamp: Date.now()
       });
+      console.log(`✅ SUCCESS: Found mapping after checking ${totalMessagesChecked} messages in ${batchCount} batches`);
       return foundMapping;
     }
 
-    // Method 2: Try using getChatHistory as fallback
-    console.log(`🔄 Trying getChatHistory fallback for ${shortId}`);
+    console.log(`❌ EXHAUSTIVE SEARCH COMPLETE: No mapping found for ${shortId} after checking ${totalMessagesChecked} messages`);
     
-    try {
-      const historyResp = await fetch(`https://api.telegram.org/bot${TOKEN}/getChatHistory`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: CHANNEL_ID,
-          limit: 100
-        })
-      });
+    // Last resort: try the updates method
+    console.log(`🔄 Trying fallback search methods...`);
+    return await searchUsingUpdates(shortId);
+
+  } catch (error) {
+    console.error(`❌ Critical error searching for ${shortId}:`, error);
+    return await searchUsingUpdates(shortId);
+  }
+}
+
+async function searchUsingUpdates(shortId) {
+  console.log(`🔄 Fallback: Using getUpdates method for ${shortId}...`);
+  
+  try {
+    // Clear any pending updates first
+    await fetch(`https://api.telegram.org/bot${TOKEN}/getUpdates?offset=-1&limit=1`);
+    
+    let foundMapping = null;
+    let offset = 0;
+    let attempts = 0;
+    const maxAttempts = 100;
+
+    while (!foundMapping && attempts < maxAttempts) {
+      const updatesUrl = `https://api.telegram.org/bot${TOKEN}/getUpdates?offset=${offset}&limit=100&allowed_updates=["message"]`;
       
-      if (historyResp.ok) {
-        const historyJson = await historyResp.json();
-        if (historyJson.result) {
-          for (const message of historyJson.result) {
-            if (message.text && message.text.includes(shortId)) {
-              console.log(`📋 Found in history: ${message.text}`);
-              // Process the same way as above
-              if (message.text.startsWith(`FILE_MAP_${shortId}:`)) {
-                try {
-                  const jsonStr = message.text.replace(`FILE_MAP_${shortId}:`, '');
-                  foundMapping = JSON.parse(jsonStr);
-                  break;
-                } catch (e) { /* ignore */ }
-              } else if (message.text.startsWith(shortId + "|")) {
-                const parts = message.text.split("|");
-                if (parts.length >= 3) {
-                  foundMapping = {
-                    id: shortId,
-                    file_id: parts[1],
-                    filename: parts[2],
-                    size: parts[3] ? parseInt(parts[3]) : null,
-                    timestamp: parts[4] ? parseInt(parts[4]) : null
-                  };
-                  break;
-                }
+      const resp = await fetch(updatesUrl);
+      const json = await resp.json();
+      
+      if (!json.ok || !json.result?.length) {
+        console.log(`❌ getUpdates batch ${attempts} failed or empty`);
+        break;
+      }
+
+      console.log(`📨 Updates batch ${attempts}: checking ${json.result.length} updates`);
+
+      for (const update of json.result) {
+        const message = update.message;
+        if (message?.chat?.id == CHANNEL_ID && message.text) {
+          const text = message.text;
+          
+          if (text.includes(shortId)) {
+            console.log(`🎯 Found message containing ${shortId}: ${text.substring(0, 100)}...`);
+            
+            // Parse the mapping
+            if (text.startsWith(`FILE_MAP_${shortId}:`)) {
+              try {
+                const jsonStr = text.replace(`FILE_MAP_${shortId}:`, '');
+                foundMapping = JSON.parse(jsonStr);
+                break;
+              } catch (e) { /* ignore */ }
+            } else if (text.startsWith(`${shortId}|`)) {
+              const parts = text.split('|');
+              if (parts.length >= 3) {
+                foundMapping = {
+                  id: shortId,
+                  file_id: parts[1],
+                  filename: parts[2],
+                  size: parts[3] ? parseInt(parts[3]) : null,
+                  timestamp: parts[4] ? parseInt(parts[4]) : null
+                };
+                break;
               }
             }
           }
         }
+        
+        offset = Math.max(offset, update.update_id + 1);
       }
-    } catch (historyErr) {
-      console.log(`⚠️ getChatHistory failed:`, historyErr.message);
+
+      if (foundMapping || json.result.length < 100) break;
+      attempts++;
     }
 
     if (foundMapping) {
@@ -141,34 +226,31 @@ async function findFileMapping(shortId) {
         timestamp: Date.now()
       });
       console.log(`✅ Found via fallback method:`, foundMapping);
-      return foundMapping;
     }
 
-    console.log(`❌ No mapping found for ${shortId} after all methods`);
-    return null;
-
+    return foundMapping;
+    
   } catch (error) {
-    console.error(`❌ Error searching for ${shortId}:`, error);
+    console.error(`❌ Fallback search error:`, error);
     return null;
   }
 }
 
+// Add OPTIONS handler for CORS
 export default async function handler(req, res) {
   const { slug } = req.query;
   
-  // Handle HEAD requests (for link previews)
-  if (req.method === 'HEAD') {
-    res.status(200).end();
-    return;
-  }
-  
-  // Handle OPTIONS requests (CORS preflight)
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Range');
-    res.status(200).end();
-    return;
+    return res.status(200).end();
+  }
+  
+  // Handle HEAD requests
+  if (req.method === 'HEAD') {
+    return res.status(200).end();
   }
   
   if (!slug) {
@@ -203,7 +285,7 @@ export default async function handler(req, res) {
   const shortId = parts.pop();
   const fileName = decodeURIComponent(parts.join("-"));
 
-  console.log(`📥 Download request: slug=${slug}, shortId=${shortId}, fileName=${fileName}`);
+  console.log(`📥 Download request: slug=${slug}, shortId=${shortId}, fileName=${fileName}, channelId=${CHANNEL_ID}`);
 
   if (!shortId || shortId.length < 5) {
     return res.status(400).send(`
@@ -237,7 +319,7 @@ export default async function handler(req, res) {
     const mappingData = await findFileMapping(shortId);
     
     if (!mappingData) {
-      console.log(`❌ File mapping not found for ID: ${shortId}`);
+      console.log(`❌ File mapping not found for ID: ${shortId} in channel: ${CHANNEL_ID}`);
       
       return res.status(404).send(`
         <!DOCTYPE html>
@@ -259,26 +341,37 @@ export default async function handler(req, res) {
         <body>
           <div class="container">
             <div class="logo">🎬 Filmzi Cloud</div>
-            <h1>File Not Found</h1>
-            <div class="error">The requested file could not be located in our storage system.</div>
+            <h1>🔍 Advanced File Search Failed</h1>
+            <div class="error">Exhaustive search completed - file mapping not found</div>
             
             <div class="info">
               <strong>Search Details:</strong><br>
               File ID: <code>${shortId}</code><br>
               Requested Name: <code>${fileName}</code><br>
-              Channel ID: <code>${CHANNEL_ID}</code>
+              Channel ID: <code>${CHANNEL_ID}</code><br>
+              Search Methods: getChatHistory + getUpdates + Cache
             </div>
             
             <div class="suggestion">
-              <strong>Troubleshooting:</strong><br>
-              • Verify the download link is complete and correct<br>
-              • Check if the file was recently uploaded (may take a moment to index)<br>
-              • Contact the person who shared this link<br>
-              • Try generating a new link if you have the original file
+              <strong>🚨 Possible Issues:</strong><br>
+              • File was never uploaded to the bot<br>
+              • Bot doesn't have admin access to the storage channel<br>
+              • File was uploaded to a different channel<br>
+              • The file ID was typed incorrectly<br>
+              • File mapping was corrupted during save
             </div>
             
             <div class="debug">
-              <strong>For Support:</strong> Reference ID ${shortId} - ${new Date().toISOString()}
+              <strong>🔧 For Bot Owner - Debug Steps:</strong><br>
+              1. Check if bot is admin in channel ${CHANNEL_ID}<br>
+              2. Manually search channel for "${shortId}"<br>
+              3. Verify TOKEN and CHANNEL_ID in environment<br>
+              4. Check bot logs during file upload<br>
+              5. Test with a new file upload
+            </div>
+            
+            <div class="debug">
+              <strong>Support Reference:</strong> ${shortId} - ${new Date().toISOString()}
             </div>
           </div>
         </body>
