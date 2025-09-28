@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import fetch from 'node-fetch';
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
@@ -9,11 +10,11 @@ const redis = new Redis({
 });
 
 function randomId() {
-  return Math.floor(10000 + Math.random() * 90000); // random 5-digit
+  return Math.floor(10000 + Math.random() * 90000);
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('❌ Method not allowed');
+  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
   const update = req.body;
   const message = update.message;
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
 
   const chatId = message.chat.id;
 
-  // Handle /start
+  // /start
   if (message.text && message.text.startsWith('/start')) {
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
@@ -35,12 +36,12 @@ export default async function handler(req, res) {
     return res.status(200).send('ok');
   }
 
-  // Handle file upload
+  // Handle files
   const fileObj = message.document || message.video || message.audio;
   if (!fileObj) return res.status(200).send('No file found');
 
   try {
-    // Forward to channel (permanent storage)
+    // Forward file to channel (permanent storage)
     const fwd = await fetch(`https://api.telegram.org/bot${TOKEN}/forwardMessage`, {
       method: 'POST',
       body: new URLSearchParams({
@@ -55,13 +56,13 @@ export default async function handler(req, res) {
     const fileName = fileObj.file_name || 'file';
     const shortId = randomId();
 
-    // Save mapping in Redis: shortId => { fileId, fileName }
+    // Save mapping in Redis
     await redis.set(`file:${shortId}`, JSON.stringify({ fileId, fileName }));
 
-    // Build permanent link: /dl/shortId/fileName
+    // Build permanent link
     const link = `${BASE_URL}/dl/${shortId}/${encodeURIComponent(fileName)}`;
 
-    // Reply back to user
+    // Reply to user
     await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
 
     return res.status(200).send('ok');
   } catch (err) {
-    console.error('webhook error', err);
+    console.error('Webhook error:', err);
     return res.status(500).send('Server error');
   }
 }
