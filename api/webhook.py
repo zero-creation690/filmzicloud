@@ -4,10 +4,23 @@ import os
 import random
 import requests
 from urllib.parse import urlencode, quote
+import redis
 
 # Environment variables
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHANNEL_ID = os.environ.get('CHANNEL_ID')
+REDIS_URL = os.environ.get('UPSTASH_REDIS_REST_URL')
+REDIS_TOKEN = os.environ.get('UPSTASH_REDIS_REST_TOKEN')
+
+# Initialize Redis
+def get_redis_client():
+    return redis.Redis(
+        host=REDIS_URL.replace('https://', '').split(':')[0],
+        port=6379,
+        password=REDIS_TOKEN,
+        ssl=True,
+        decode_responses=True
+    )
 
 def random_id():
     """Generate a random 8-digit ID"""
@@ -57,20 +70,30 @@ def copy_message_to_channel(chat_id, message_id, caption=None):
     response = requests.post(url, json=data)
     return response.json()
 
-def save_file_mapping(channel_msg_id, short_id, file_id, file_name):
-    """Save file mapping as reply in channel"""
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    
-    mapping_data = f"📁 FILE_MAPPING\nID: {short_id}\nFile: {file_name}\nMsgID: {channel_msg_id}"
-    
-    data = {
-        'chat_id': CHANNEL_ID,
-        'text': mapping_data,
-        'reply_to_message_id': channel_msg_id
-    }
-    
-    response = requests.post(url, json=data)
-    return response.json()
+def save_to_redis(short_id, file_data):
+    """Save file mapping to Redis"""
+    try:
+        r = get_redis_client()
+        key = f"file:{short_id}"
+        # Store with no expiration (permanent)
+        r.set(key, json.dumps(file_data))
+        return True
+    except Exception as e:
+        print(f"Redis save error: {e}")
+        return False
+
+def get_from_redis(short_id):
+    """Get file mapping from Redis"""
+    try:
+        r = get_redis_client()
+        key = f"file:{short_id}"
+        data = r.get(key)
+        if data:
+            return json.loads(data)
+        return None
+    except Exception as e:
+        print(f"Redis get error: {e}")
+        return None
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -97,7 +120,8 @@ class handler(BaseHTTPRequestHandler):
                                f"📂 Send me any file (up to 2GB) and I'll give you a *PERMANENT* download link ⚡\n\n"
                                f"🛡️ Files stored forever in *Filmzi Cloud*!\n"
                                f"🔗 Links never expire!\n"
-                               f"💾 Supports files up to *2GB*")
+                               f"💾 Supports files up to *2GB*\n"
+                               f"💾 *Redis-powered permanent storage!*")
                 
                 send_message(chat_id, response_text, parse_mode="Markdown")
                 self.send_response(200)
@@ -138,11 +162,11 @@ class handler(BaseHTTPRequestHandler):
             # Create caption for the file
             caption = f"📁 {file_name}\n💾 {size_mb} MB\n🆔 {short_id}"
             
-            # METHOD 1: Try copyMessage first (works for most files)
+            # Store file in channel
             storage_result = copy_message_to_channel(chat_id, message_id, caption)
             
             if not storage_result.get('ok'):
-                # METHOD 2: Try forwardMessage for smaller files
+                # Fallback: try forwardMessage
                 try:
                     forward_url = f"https://api.telegram.org/bot{TOKEN}/forwardMessage"
                     forward_data = {
@@ -152,17 +176,6 @@ class handler(BaseHTTPRequestHandler):
                     }
                     forward_response = requests.post(forward_url, json=forward_data)
                     storage_result = forward_response.json()
-                    
-                    # If forward worked, edit the message to add caption
-                    if storage_result.get('ok'):
-                        channel_msg_id = storage_result['result']['message_id']
-                        edit_url = f"https://api.telegram.org/bot{TOKEN}/editMessageCaption"
-                        edit_data = {
-                            'chat_id': CHANNEL_ID,
-                            'message_id': channel_msg_id,
-                            'caption': caption
-                        }
-                        requests.post(edit_url, json=edit_data)
                 except Exception as e:
                     send_message(chat_id, f"❌ Failed to store file: {str(e)}")
                     self.send_response(200)
@@ -180,15 +193,29 @@ class handler(BaseHTTPRequestHandler):
             
             channel_msg_id = storage_result['result']['message_id']
             
-            # Now get the file URL (after successful storage)
+            # Get file URL for permanent access
             file_url = get_file_url(file_id)
             
-            if not file_url:
-                # If we can't get direct URL, we'll use the file_id for download
-                file_url = f"File ID: {file_id}"
+            # Prepare file data for Redis
+            file_data = {
+                'file_id': file_id,
+                'file_name': file_name,
+                'file_size': file_size,
+                'file_url': file_url,
+                'channel_msg_id': channel_msg_id,
+                'timestamp': int(os.times().elapsed),
+                'short_id': short_id
+            }
             
-            # Save file mapping
-            mapping_result = save_file_mapping(channel_msg_id, short_id, file_id, file_name)
+            # Save to Redis (permanent storage)
+            redis_success = save_to_redis(short_id, file_data)
+            
+            if not redis_success:
+                send_message(chat_id, "❌ Failed to create permanent storage. Please try again.")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'Redis storage failed')
+                return
             
             # Build REAL permanent download link
             domain = os.environ.get('VERCEL_URL', 'your-app.vercel.app')
@@ -205,8 +232,9 @@ class handler(BaseHTTPRequestHandler):
                             f"📁 *File:* `{file_name}`\n"
                             f"📊 *Size:* {size_mb} MB\n"
                             f"🔗 *Download:* `{download_link}`\n\n"
-                            f"🛡️ *Stored FOREVER in Filmzi Cloud!*\n"
-                            f"⚡ *Link NEVER expires!*")
+                            f"🛡️ *Stored FOREVER in Redis Cloud!*\n"
+                            f"⚡ *Link NEVER expires!*\n"
+                            f"💾 *File ID:* `{short_id}`")
             
             send_message(chat_id, response_text, parse_mode="Markdown")
             
@@ -233,6 +261,7 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         response = {
             "status": "Filmzi Cloud Bot is running!",
-            "endpoint": "POST /api/webhook for Telegram updates"
+            "storage": "Redis-powered permanent storage",
+            "features": "Permanent download links, 2GB file support"
         }
         self.wfile.write(json.dumps(response, indent=2).encode())
