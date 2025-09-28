@@ -11,15 +11,17 @@
     {
       "src": "/api/webhook",
       "dest": "/api/webhook.py",
-      "methods": ["GET", "POST"]
+      "methods": ["GET", "POST", "HEAD"]
     },
     {
       "src": "/api/download/(.*)",
-      "dest": "/api/download/[slug].py"
+      "dest": "/api/download/[slug].py",
+      "methods": ["GET", "HEAD"]
     },
     {
       "src": "/(.*)",
-      "dest": "/api/webhook.py"
+      "dest": "/api/webhook.py",
+      "methods": ["GET", "HEAD"]
     }
   ],
   "env": {
