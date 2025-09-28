@@ -30,29 +30,47 @@ def send_message(chat_id, text, parse_mode=None):
     
     return response.json()
 
-def forward_to_channel(chat_id, message_id):
-    """Forward message to storage channel"""
-    url = f"https://api.telegram.org/bot{TOKEN}/forwardMessage"
+def get_file_url(file_id):
+    """Get file URL from file_id"""
+    url = f"https://api.telegram.org/bot{TOKEN}/getFile"
+    data = {'file_id': file_id}
+    response = requests.post(url, data=data)
+    
+    if response.status_code == 200:
+        result = response.json()
+        if result.get('ok'):
+            file_path = result['result']['file_path']
+            return f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+    return None
+
+def send_file_to_channel(file_url, file_name, caption=None):
+    """Send file to channel via URL (supports up to 2GB)"""
+    # For files over 50MB, we need to use sendDocument with URL
+    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
     
     data = {
         'chat_id': CHANNEL_ID,
-        'from_chat_id': chat_id,
-        'message_id': message_id
+        'document': file_url
     }
     
-    response = requests.post(url, data=urlencode(data))
+    if caption:
+        data['caption'] = caption
+    
+    response = requests.post(url, data=data)
     return response.json()
 
-def save_file_mapping(channel_msg_id, short_id, file_id, file_name):
+def save_file_mapping(channel_msg_id, short_id, file_id, file_name, file_url):
     """Save file mapping as reply in channel"""
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     
-    mapping_data = f"FILMZI_MAP:{short_id}|{file_id}|{file_name}|{channel_msg_id}"
+    # Store both file_id and file_url for redundancy
+    mapping_data = f"FILMZI_MAP:{short_id}|{file_id}|{file_name}|{channel_msg_id}|{file_url}"
     
     data = {
         'chat_id': CHANNEL_ID,
         'text': mapping_data,
-        'reply_to_message_id': channel_msg_id
+        'reply_to_message_id': channel_msg_id,
+        'parse_mode': 'HTML'
     }
     
     response = requests.post(url, data=urlencode(data))
@@ -79,9 +97,10 @@ class handler(BaseHTTPRequestHandler):
             if message.get('text', '').startswith('/start'):
                 first_name = message.get('from', {}).get('first_name', 'friend')
                 response_text = (f"👋 Hello *{first_name}*!\n\n"
-                               f"📂 Send me any file and I'll give you a *PERMANENT* download link ⚡\n\n"
+                               f"📂 Send me any file (up to 2GB) and I'll give you a *PERMANENT* download link ⚡\n\n"
                                f"🛡️ Files stored forever in *Filmzi Cloud*!\n"
-                               f"🔗 Links never expire!")
+                               f"🔗 Links never expire!\n"
+                               f"💾 Supports files up to *2GB*")
                 
                 send_message(chat_id, response_text, parse_mode="Markdown")
                 self.send_response(200)
@@ -115,20 +134,60 @@ class handler(BaseHTTPRequestHandler):
             
             short_id = str(random_id())
             
-            # Forward file to channel for permanent storage
-            forward_result = forward_to_channel(chat_id, message['message_id'])
+            # Get file URL from Telegram
+            file_url = get_file_url(file_id)
+            if not file_url:
+                send_message(chat_id, "❌ Failed to get file URL from Telegram. Please try again.")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'File URL failed')
+                return
             
-            if not forward_result.get('ok'):
+            # Send file to channel using URL (supports large files)
+            file_size = file_obj.get('file_size', 0)
+            size_mb = round(file_size / (1024 * 1024), 2) if file_size > 0 else 'Unknown'
+            
+            caption = f"📁 {file_name}\n📊 {size_mb} MB\n🆔 {short_id}"
+            
+            send_result = send_file_to_channel(file_url, file_name, caption)
+            
+            if not send_result.get('ok'):
+                # If URL method fails, try traditional forward for small files
+                if file_size <= 50 * 1024 * 1024:  # 50MB limit for forwardMessage
+                    try:
+                        # Try forwarding for small files
+                        forward_url = f"https://api.telegram.org/bot{TOKEN}/forwardMessage"
+                        forward_data = {
+                            'chat_id': CHANNEL_ID,
+                            'from_chat_id': chat_id,
+                            'message_id': message['message_id']
+                        }
+                        forward_response = requests.post(forward_url, data=forward_data)
+                        send_result = forward_response.json()
+                    except Exception as e:
+                        send_message(chat_id, f"❌ Failed to store file: {str(e)}")
+                        self.send_response(200)
+                        self.end_headers()
+                        self.wfile.write(b'Storage failed')
+                        return
+                else:
+                    send_message(chat_id, "❌ Failed to store large file. Please try a smaller file or try again.")
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'Large file storage failed')
+                    return
+            
+            if not send_result.get('ok'):
                 send_message(chat_id, "❌ Failed to store file. Please try again.")
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(b'Forward failed')
+                self.wfile.write(b'Storage failed')
                 return
             
-            channel_msg_id = forward_result['result']['message_id']
+            channel_msg_id = send_result['result']['message_id']
             
             # Save file mapping
-            mapping_result = save_file_mapping(channel_msg_id, short_id, file_id, file_name)
+            mapping_result = save_file_mapping(channel_msg_id, short_id, file_id, file_name, file_url)
             
             if not mapping_result.get('ok'):
                 send_message(chat_id, "❌ Failed to create download link. Please try again.")
@@ -147,17 +206,14 @@ class handler(BaseHTTPRequestHandler):
             encoded_name = quote(clean_name)
             download_link = f"{domain}/api/download/{encoded_name}-{short_id}"
             
-            # Get file size for display
-            file_size = file_obj.get('file_size', 0)
-            size_mb = round(file_size / (1024 * 1024), 2) if file_size > 0 else 'Unknown'
-            
             # Send success response to user
             response_text = (f"✅ *PERMANENT* link created!\n\n"
                             f"📁 *File:* `{file_name}`\n"
                             f"📊 *Size:* {size_mb} MB\n"
                             f"🔗 *Download:* {download_link}\n\n"
                             f"🛡️ *Stored FOREVER in Filmzi Cloud!*\n"
-                            f"⚡ *Link NEVER expires!*")
+                            f"⚡ *Link NEVER expires!*\n"
+                            f"💾 *Supports up to 2GB files!*")
             
             send_message(chat_id, response_text, parse_mode="Markdown")
             
@@ -176,9 +232,10 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         response = {
             "status": "Filmzi Cloud Bot is running!",
-            "endpoints": {
-                "POST": "/api/webhook - Telegram webhook",
-                "GET": "/api/download/[filename]-[id] - Download files"
+            "features": {
+                "file_size": "Supports up to 2GB files",
+                "storage": "Permanent Telegram storage",
+                "links": "Never-expiring download links"
             }
         }
         self.wfile.write(json.dumps(response, indent=2).encode())
