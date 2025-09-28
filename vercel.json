@@ -5,6 +5,9 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1.js" },
-    { "src": "/dl/([^/]+)/(.+)", "dest": "/api/dl/[shortId]/[fileName].js" }
+    {
+      "src": "/dl/([^/]+)/(.*)",
+      "dest": "/api/dl/[shortId]/index.js?fileName=$2&shortId=$1"
+    }
   ]
 }
