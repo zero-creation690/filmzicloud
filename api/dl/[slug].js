@@ -1,6 +1,11 @@
 // api/dl/[slug].js
+import { Redis } from "@upstash/redis";
+
 const TOKEN = process.env.TELEGRAM_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_URL,
+  token: process.env.UPSTASH_REDIS_TOKEN
+});
 
 export default async function handler(req, res) {
   const { slug } = req.query;
@@ -11,32 +16,21 @@ export default async function handler(req, res) {
   const fileName = decodeURIComponent(parts.join("-"));
 
   try {
-    // Get channel messages (search mapping)
-    const resp = await fetch(`https://api.telegram.org/bot${TOKEN}/getUpdates`);
-    const json = await resp.json();
+    // ✅ Fetch mapping from Redis
+    const data = await redis.get(shortId);
+    if (!data) return res.status(404).send('File not found');
 
-    let fileId = null;
-    for (const upd of json.result) {
-      if (upd.message && upd.message.chat.id == CHANNEL_ID) {
-        const txt = upd.message.text || "";
-        if (txt.startsWith(shortId + "|")) {
-          fileId = txt.split("|")[1];
-          break;
-        }
-      }
-    }
+    const { fileId } = JSON.parse(data);
 
-    if (!fileId) return res.status(404).send('File not found');
-
-    // Ask Telegram for file path
+    // ✅ Get file path from Telegram
     const gf = await fetch(`https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`);
     const gfJson = await gf.json();
-    if (!gfJson.ok) return res.status(502).send('Could not get file');
+    if (!gfJson.ok) return res.status(502).send('Could not get file path');
 
     const file_path = gfJson.result.file_path;
     const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file_path}`;
 
-    // Proxy with streaming + range support
+    // ✅ Proxy with streaming + range support
     const headers = {};
     if (req.headers.range) headers['range'] = req.headers.range;
 
