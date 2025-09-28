@@ -5,6 +5,9 @@
     },
     "api/download/[slug].py": {
       "maxDuration": 30
+    },
+    "api/stream/[slug].py": {
+      "maxDuration": 30
     }
   },
   "routes": [
@@ -16,6 +19,11 @@
     {
       "src": "/api/download/(.*)",
       "dest": "/api/download/[slug].py",
+      "methods": ["GET", "HEAD"]
+    },
+    {
+      "src": "/api/stream/(.*)",
+      "dest": "/api/stream/[slug].py",
       "methods": ["GET", "HEAD"]
     },
     {
