@@ -1,19 +1,10 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    }
+    { "src": "api/**/*.js", "use": "@vercel/node" }
   ],
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1.js"
-    },
-    {
-      "src": "/dl/(.*)",
-      "dest": "/api/dl/[slug].js"
-    }
+    { "src": "/api/(.*)", "dest": "/api/$1.js" },
+    { "src": "/dl/([^/]+)/(.+)", "dest": "/api/dl/[shortId]/[fileName].js" }
   ]
 }
