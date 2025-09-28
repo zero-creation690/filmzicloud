@@ -1,9 +1,12 @@
 import { Redis } from "@upstash/redis";
 
-const TOKEN = process.env.TELEGRAM_TOKEN;
+// ---- Bot token ----
+const TOKEN = "8314502536:AAFLGwBTzCXPxvBPC5oMIiSKVyDaY5sm5mY";
+
+// ---- Redis connection ----
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_URL,
-  token: process.env.UPSTASH_REDIS_TOKEN
+  url: "https://together-spaniel-13493.upstash.io",
+  token: "ATS1AAIncDJmMTE3M2ZmZGRjYTU0NGEwOGExODRjYTA2YjUwM2UwZnAyMTM0OTM"
 });
 
 export default async function handler(req, res) {
@@ -15,13 +18,13 @@ export default async function handler(req, res) {
   const fileName = decodeURIComponent(parts.join("-"));
 
   try {
-    // ✅ Fetch file mapping from Redis
+    // Fetch from Redis
     const data = await redis.get(shortId);
     if (!data) return res.status(404).send('File not found');
 
     const { fileId } = JSON.parse(data);
 
-    // ✅ Get Telegram file path
+    // Get Telegram file path
     const gf = await fetch(`https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`);
     const gfJson = await gf.json();
     if (!gfJson.ok) return res.status(502).send('Could not get file path');
@@ -29,7 +32,7 @@ export default async function handler(req, res) {
     const file_path = gfJson.result.file_path;
     const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file_path}`;
 
-    // Proxy streaming with range support
+    // Proxy streaming
     const headers = {};
     if (req.headers.range) headers['range'] = req.headers.range;
 
@@ -41,7 +44,7 @@ export default async function handler(req, res) {
     if (!upstream.body) return res.end();
     upstream.body.pipe(res);
   } catch (err) {
-    console.error('dl error', err);
+    console.error('Download error:', err);
     return res.status(500).send('Download error');
   }
 }
