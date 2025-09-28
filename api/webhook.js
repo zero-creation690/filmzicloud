@@ -1,46 +1,82 @@
-import { Redis } from "@upstash/redis";
-
 const TOKEN = process.env.TELEGRAM_TOKEN;
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_URL,
-  token: process.env.UPSTASH_REDIS_TOKEN
-});
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const BASE_URL = process.env.BASE_URL || '';
+
+function randomId() {
+  return Math.floor(10000 + Math.random() * 90000); // random 5-digit
+}
 
 export default async function handler(req, res) {
-  const { slug } = req.query;
-  if (!slug) return res.status(400).send('Missing slug');
+  if (req.method !== 'POST') return res.status(405).send('❌ Method not allowed');
 
-  const parts = slug.split("-");
-  const shortId = parts.pop();
-  const fileName = decodeURIComponent(parts.join("-"));
+  const update = req.body;
+  const message = update.message;
+  if (!message) return res.status(200).send('No message');
+
+  const chatId = message.chat.id;
+
+  // ✅ Handle /start
+  if (message.text && message.text.startsWith('/start')) {
+    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        chat_id: chatId,
+        text: `👋 Hello *${message.from.first_name || "friend"}*!\n\n📂 Send me any file and I’ll give you a permanent download link ⚡\n\n🛡️ Stored safely in *Filmzi Cloud*!`,
+        parse_mode: "Markdown"
+      })
+    });
+    return res.status(200).send('ok');
+  }
+
+  // ✅ Handle file upload
+  let fileObj = message.document || message.video || message.audio || null;
+  if (!fileObj) return res.status(200).send('No file found');
 
   try {
-    const data = await redis.get(shortId);
-    if (!data) return res.status(404).send('File not found');
+    // Forward file to channel (permanent storage)
+    const fwd = await fetch(`https://api.telegram.org/bot${TOKEN}/forwardMessage`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        chat_id: CHANNEL_ID,
+        from_chat_id: chatId,
+        message_id: message.message_id
+      })
+    });
+    const fwdJson = await fwd.json();
 
-    const { fileId } = JSON.parse(data);
+    const fileId = fileObj.file_id;
+    const fileName = fileObj.file_name || 'file';
+    const shortId = randomId();
 
-    // Get Telegram file path
-    const gf = await fetch(`https://api.telegram.org/bot${TOKEN}/getFile?file_id=${fileId}`);
-    const gfJson = await gf.json();
-    if (!gfJson.ok) return res.status(502).send('Could not get file path');
+    // Save mapping in channel (reply message with ID + file_id + name)
+    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        chat_id: CHANNEL_ID,
+        reply_to_message_id: fwdJson.result.message_id,
+        text: `${shortId}|${fileId}|${fileName}`
+      })
+    });
 
-    const file_path = gfJson.result.file_path;
-    const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file_path}`;
+    // Build permanent link
+    const base = BASE_URL || `https://${req.headers.host}`;
+    const link = `${base}/dl/${encodeURIComponent(fileName)}-${shortId}`;
 
-    // Proxy streaming with range support
-    const headers = {};
-    if (req.headers.range) headers['range'] = req.headers.range;
+    // Reply to user
+    await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        chat_id: chatId,
+        text: `✅ Your link is ready!\n\n🎬 *File:* ${fileName}\n🔗 *Download:* ${link}\n\n⚡ Stored safely in Filmzi Cloud!`,
+        parse_mode: "Markdown"
+      })
+    });
 
-    const upstream = await fetch(fileUrl, { headers });
-    res.status(upstream.status);
-    upstream.headers.forEach((v, k) => res.setHeader(k, v));
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
-
-    if (!upstream.body) return res.end();
-    upstream.body.pipe(res);
+    return res.status(200).send('ok');
   } catch (err) {
-    console.error('Download error:', err);
-    return res.status(500).send('Download error');
+    console.error('webhook error', err);
+    return res.status(500).send('Server error');
   }
 }
